@@ -5,7 +5,9 @@ import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Point;
 import android.os.Build;
 import android.view.*;
@@ -24,7 +26,9 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
 
     private static final int APPWIDGET_HOST_ID = 442;
 
-    private static final String WIDGET_PREF_KEY = "widget-id";
+    private static final String WIDGET_PREFERENCE_ID = "fr.neamar.kiss.widgetprefs";
+
+    private SharedPreferences widgetPrefs;
     /**
      * Widget fields
      */
@@ -42,6 +46,7 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
 
     void onCreate() {
         // Initialize widget manager and host, restore widgets
+        widgetPrefs = mainActivity.getSharedPreferences(WIDGET_PREFERENCE_ID, Context.MODE_PRIVATE);
         mAppWidgetManager = AppWidgetManager.getInstance(mainActivity);
         mAppWidgetHost = new AppWidgetHost(mainActivity, APPWIDGET_HOST_ID);
         widgetArea = mainActivity.findViewById(R.id.widgetLayout);
@@ -270,7 +275,9 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
         // remove widget from view
         mAppWidgetHost.deleteAppWidgetId(appWidgetId);
         // remove widget id from persistent prefs
-        prefs.edit().remove(WIDGET_PREF_KEY).apply();
+        SharedPreferences.Editor widgetPrefsEditor = widgetPrefs.edit();
+        widgetPrefsEditor.remove(String.valueOf(appWidgetId));
+        widgetPrefsEditor.apply();
     }
 
     private boolean canAddWidget() {
