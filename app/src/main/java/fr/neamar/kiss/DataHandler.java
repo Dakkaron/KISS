@@ -1,5 +1,6 @@
 package fr.neamar.kiss;
 
+import android.annotation.TargetApi;
 import android.app.KeyguardManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -8,7 +9,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
-import android.graphics.Bitmap.CompressFormat;
+import android.content.pm.ShortcutInfo;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
@@ -18,7 +20,6 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -32,17 +33,20 @@ import fr.neamar.kiss.dataprovider.AppProvider;
 import fr.neamar.kiss.dataprovider.ContactsProvider;
 import fr.neamar.kiss.dataprovider.IProvider;
 import fr.neamar.kiss.dataprovider.Provider;
-import fr.neamar.kiss.dataprovider.SearchProvider;
+import fr.neamar.kiss.dataprovider.simpleprovider.SearchProvider;
 import fr.neamar.kiss.dataprovider.ShortcutsProvider;
 import fr.neamar.kiss.dataprovider.simpleprovider.CalculatorProvider;
 import fr.neamar.kiss.dataprovider.simpleprovider.PhoneProvider;
+import fr.neamar.kiss.dataprovider.simpleprovider.SettingsProvider;
+import fr.neamar.kiss.dataprovider.simpleprovider.TagsProvider;
 import fr.neamar.kiss.db.DBHelper;
 import fr.neamar.kiss.db.ShortcutRecord;
 import fr.neamar.kiss.db.ValuedHistoryRecord;
 import fr.neamar.kiss.pojo.AppPojo;
 import fr.neamar.kiss.pojo.Pojo;
-import fr.neamar.kiss.pojo.ShortcutsPojo;
+import fr.neamar.kiss.pojo.ShortcutPojo;
 import fr.neamar.kiss.searcher.Searcher;
+import fr.neamar.kiss.utils.ShortcutUtil;
 import fr.neamar.kiss.utils.UserHandle;
 
 public class DataHandler extends BroadcastReceiver
@@ -57,7 +61,7 @@ public class DataHandler extends BroadcastReceiver
      * List all known providers
      */
     final static private List<String> PROVIDER_NAMES = Arrays.asList(
-            "app", "contacts", "settings", "shortcuts"
+            "app", "contacts", "shortcuts"
     );
     private TagsHandler tagsHandler;
     final private Context context;
@@ -110,6 +114,12 @@ public class DataHandler extends BroadcastReceiver
         ProviderEntry searchEntry = new ProviderEntry();
         searchEntry.provider = new SearchProvider(context);
         this.providers.put("search", searchEntry);
+        ProviderEntry settingsEntry = new ProviderEntry();
+        settingsEntry.provider = new SettingsProvider(context);
+        this.providers.put("settings", settingsEntry);
+        ProviderEntry tagsEntry = new ProviderEntry();
+        tagsEntry.provider = new TagsProvider();
+        this.providers.put("tags", tagsEntry);
     }
 
     @Override
@@ -354,18 +364,19 @@ public class DataHandler extends BroadcastReceiver
      *
      * @param context        android context
      * @param itemCount      max number of items to retrieve, total number may be less (search or calls are not returned for instance)
-     * @param historyMode    Recency vs Frecency vs Frequency
-     * @param sortHistory sort history entries alphabetically
-     * @param itemsToExclude Items to exclude from history
+     * @param historyMode    Recency vs Frecency vs Frequency vs Adaptive
+     * @param sortHistory    Sort history entries alphabetically
+     * @param itemsToExcludeById Items to exclude from history by their id
      * @return pojos in recent history
      */
-    public ArrayList<Pojo> getHistory(Context context, int itemCount, String historyMode, boolean sortHistory, ArrayList<Pojo> itemsToExclude) {
+    public ArrayList<Pojo> getHistory(Context context, int itemCount, String historyMode,
+                                      boolean sortHistory, Set<String> itemsToExcludeById) {
         // Pre-allocate array slots that are likely to be used based on the current maximum item
         // count
         ArrayList<Pojo> history = new ArrayList<>(Math.min(itemCount, 256));
 
         // Max sure that we get enough items, regardless of how many may be excluded
-        int extendedItemCount = itemCount + itemsToExclude.size();
+        int extendedItemCount = itemCount + itemsToExcludeById.size();
 
         // Read history
         List<ValuedHistoryRecord> ids = DBHelper.getHistory(context, extendedItemCount, historyMode, sortHistory);
@@ -374,24 +385,20 @@ public class DataHandler extends BroadcastReceiver
         for (int i = 0; i < ids.size(); i++) {
             // Ask all providers if they know this id
             Pojo pojo = getPojo(ids.get(i).record);
-            if (pojo != null) {
-                // Look if the pojo should get excluded
-                boolean exclude = false;
-                for (int j = 0; j < itemsToExclude.size(); j++) {
-                    if (itemsToExclude.get(j).id.equals(pojo.id)) {
-                        exclude = true;
-                        break;
-                    }
-                }
 
-                if (!exclude) {
-                    history.add(pojo);
-                }
+            if (pojo == null) {
+                continue;
+            }
 
-                // Break if maximum number of items have been retrieved
-                if (history.size() >= itemCount) {
-                    break;
-                }
+            if(itemsToExcludeById.contains(pojo.id)) {
+                continue;
+            }
+
+            history.add(pojo);
+
+            // Break if maximum number of items have been retrieved
+            if (history.size() >= itemCount) {
+                break;
             }
         }
 
@@ -415,35 +422,49 @@ public class DataHandler extends BroadcastReceiver
         return (pojo != null) ? pojo.getName() : "???";
     }
 
-    public boolean addShortcut(ShortcutsPojo shortcut) {
-        ShortcutRecord record = new ShortcutRecord();
-        record.name = shortcut.getName();
-        record.iconResource = shortcut.resourceName;
-        record.packageName = shortcut.packageName;
-        record.intentUri = shortcut.intentUri;
+    public boolean addShortcut(ShortcutRecord record) {
+        Log.d(TAG, "Adding shortcut for " + record.packageName);
+        return DBHelper.insertShortcut(this.context, record);
+    }
 
-        if (shortcut.icon != null) {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            shortcut.icon.compress(CompressFormat.PNG, 100, baos);
-            record.icon_blob = baos.toByteArray();
+    @TargetApi(Build.VERSION_CODES.O)
+    public void addShortcut(String packageName) {
+
+        if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
         }
 
-        DBHelper.insertShortcut(this.context, record);
+        List<ShortcutInfo> shortcuts;
+        try {
+            shortcuts = ShortcutUtil.getShortcut(context, packageName);
+        } catch (SecurityException | IllegalStateException e) {
+            e.printStackTrace();
+            return;
+        }
 
-        if (this.getShortcutsProvider() != null) {
+        for (ShortcutInfo shortcutInfo : shortcuts) {
+            // Create Pojo
+            ShortcutRecord record = ShortcutUtil.createShortcutRecord(context, shortcutInfo, true);
+            if (record == null) {
+                continue;
+            }
+            // Add shortcut to the DataHandler
+            addShortcut(record);
+        }
+
+        if (!shortcuts.isEmpty() && this.getShortcutsProvider() != null) {
             this.getShortcutsProvider().reload();
         }
-
-        Log.d(TAG, "Shortcut " + shortcut.id + " added.");
-        return true;
     }
 
     public void clearHistory() {
         DBHelper.clearHistory(this.context);
     }
 
-    public void removeShortcut(ShortcutsPojo shortcut) {
-        DBHelper.removeShortcut(this.context, shortcut.getName());
+    public void removeShortcut(ShortcutPojo shortcut) {
+        // Also remove shortcut from favorites
+        removeFromFavorites(shortcut.id);
+        DBHelper.removeShortcut(this.context, shortcut);
 
         if (this.getShortcutsProvider() != null) {
             this.getShortcutsProvider().reload();
@@ -451,6 +472,17 @@ public class DataHandler extends BroadcastReceiver
     }
 
     public void removeShortcuts(String packageName) {
+        if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+
+        // Remove all shortcuts from favorites for given package name
+        List<ShortcutRecord> shortcutsList = DBHelper.getShortcuts(context, packageName);
+        for (ShortcutRecord shortcut : shortcutsList) {
+            String id = ShortcutUtil.generateShortcutId(shortcut.name);
+            removeFromFavorites(id);
+        }
+
         DBHelper.removeShortcuts(this.context, packageName);
 
         if (this.getShortcutsProvider() != null) {
@@ -483,7 +515,41 @@ public class DataHandler extends BroadcastReceiver
         // modifying in place is not supported by putStringSet()
         Set<String> excluded = new HashSet<>(getExcludedFromHistory());
         excluded.add(app.id);
+
+        if (ShortcutUtil.areShortcutsEnabled(context)) {
+            // Add all shortcuts for given package name to being excluded from history
+            List<ShortcutRecord> shortcutsList = DBHelper.getShortcuts(context, app.packageName);
+            for (ShortcutRecord shortcut : shortcutsList) {
+                String id = ShortcutUtil.generateShortcutId(shortcut.name);
+                excluded.add(id);
+            }
+            // Refresh shortcuts
+            if (!shortcutsList.isEmpty() && this.getShortcutsProvider() != null) {
+                this.getShortcutsProvider().reload();
+            }
+        }
+
         PreferenceManager.getDefaultSharedPreferences(context).edit().putStringSet("excluded-apps-from-history", excluded).apply();
+        app.setExcludedFromHistory(true);
+    }
+
+    public void removeFromExcludedFromHistory(AppPojo app) {
+        // The set needs to be cloned and then edited,
+        // modifying in place is not supported by putStringSet()
+        Set<String> excluded = new HashSet<>(getExcludedFromHistory());
+        excluded.remove(app.id);
+
+        if (ShortcutUtil.areShortcutsEnabled(context)) {
+            // Add all shortcuts for given package name to being included in history
+            List<ShortcutRecord> shortcutsList = DBHelper.getShortcuts(context, app.packageName);
+            for (ShortcutRecord shortcut : shortcutsList) {
+                String id = ShortcutUtil.generateShortcutId(shortcut.name);
+                excluded.remove(id);
+            }
+        }
+
+        PreferenceManager.getDefaultSharedPreferences(context).edit().putStringSet("excluded-apps-from-history", excluded).apply();
+        app.setExcludedFromHistory(false);
     }
 
     public void addToExcluded(AppPojo app) {
@@ -492,11 +558,31 @@ public class DataHandler extends BroadcastReceiver
         Set<String> excluded = new HashSet<>(getExcluded());
         excluded.add(app.getComponentName());
         PreferenceManager.getDefaultSharedPreferences(context).edit().putStringSet("excluded-apps", excluded).apply();
+        app.setExcluded(true);
+
+        // Ensure it's removed from favorites too
+        DataHandler dataHandler = KissApplication.getApplication(context).getDataHandler();
+        dataHandler.removeFromFavorites(app.id);
+
+        // Exclude shortcuts for this app
+        removeShortcuts(app.packageName);
+    }
+
+    public void removeFromExcluded(AppPojo app) {
+        // The set needs to be cloned and then edited,
+        // modifying in place is not supported by putStringSet()
+        Set<String> excluded = new HashSet<>(getExcluded());
+        excluded.remove(app.getComponentName());
+        PreferenceManager.getDefaultSharedPreferences(context).edit().putStringSet("excluded-apps", excluded).apply();
+        app.setExcluded(false);
+
+        // Add shortcuts for this app
+        addShortcut(app.packageName);
     }
 
     public void removeFromExcluded(String packageName) {
         Set<String> excluded = getExcluded();
-        Set<String> newExcluded = new HashSet<String>();
+        Set<String> newExcluded = new HashSet<>();
         for (String excludedItem : excluded) {
             if (!excludedItem.contains(packageName + "/")) {
                 newExcluded.add(excludedItem);
@@ -513,7 +599,7 @@ public class DataHandler extends BroadcastReceiver
         }
 
         Set<String> excluded = getExcluded();
-        Set<String> newExcluded = new HashSet<String>();
+        Set<String> newExcluded = new HashSet<>();
         for (String excludedItem : excluded) {
             if (!user.hasStringUserSuffix(excludedItem, '#')) {
                 newExcluded.add(excludedItem);
@@ -523,15 +609,26 @@ public class DataHandler extends BroadcastReceiver
         PreferenceManager.getDefaultSharedPreferences(context).edit().putStringSet("excluded-apps", newExcluded).apply();
     }
 
+	/**
+	 * Return all applications (including excluded)
+	 *
+	 * @return pojos for all applications
+	 */
+	@Nullable
+	public List<AppPojo> getApplications() {
+		AppProvider appProvider = getAppProvider();
+		return appProvider != null ? appProvider.getAllApps() : null;
+	}
+
     /**
      * Return all applications
      *
      * @return pojos for all applications
      */
     @Nullable
-    public List<Pojo> getApplications() {
+    public List<AppPojo> getApplicationsWithoutExcluded() {
         AppProvider appProvider = getAppProvider();
-        return appProvider != null ? appProvider.getAllApps() : null;
+        return appProvider != null ? appProvider.getAllAppsWithoutExcluded() : null;
     }
 
     @Nullable
@@ -565,15 +662,13 @@ public class DataHandler extends BroadcastReceiver
      * @return favorites' pojo
      */
     public ArrayList<Pojo> getFavorites() {
-        ArrayList<Pojo> favorites = new ArrayList<>();
 
         String favApps = PreferenceManager.getDefaultSharedPreferences(this.context).
                 getString("favorite-apps-list", "");
+        assert favApps != null;
+
         List<String> favAppsList = Arrays.asList(favApps.split(";"));
-
-        // We might skip some later but this avoid to expand memory multiple times
-        favorites.ensureCapacity(favAppsList.size());
-
+        ArrayList<Pojo> favorites = new ArrayList<>(favAppsList.size());
         // Find associated items
         for (int i = 0; i < favAppsList.size(); i++) {
             Pojo pojo = getPojo(favAppsList.get(i));
@@ -593,21 +688,24 @@ public class DataHandler extends BroadcastReceiver
      * @param position the new position of the fav
      */
     public void setFavoritePosition(MainActivity context, String id, int position) {
-        String favApps = PreferenceManager.getDefaultSharedPreferences(this.context).
-                getString("favorite-apps-list", "");
-        List<String> favAppsList = new ArrayList<>(Arrays.asList(favApps.split(";")));
+        List<Pojo> currentFavorites = getFavorites();
+        List<String> favAppsList = new ArrayList<>();
+
+        for(Pojo pojo : currentFavorites) {
+            favAppsList.add(pojo.getHistoryId());
+        }
 
         int currentPos = favAppsList.indexOf(id);
         if (currentPos == -1) {
             Log.e(TAG, "Couldn't find id in favAppsList");
             return;
         }
-        // Clamp the position so we dont just extend past the end of the array.
+        // Clamp the position so we don't just extend past the end of the array.
         position = Math.min(position, favAppsList.size() - 1);
 
         favAppsList.remove(currentPos);
-        // Because we're removing ourselves from the array, positions may change, we should take that into account
-        favAppsList.add(currentPos > position ? position + 1 : position, id);
+        favAppsList.add(position, id);
+
         String newFavList = TextUtils.join(";", favAppsList);
 
         PreferenceManager.getDefaultSharedPreferences(context).edit()
@@ -616,27 +714,12 @@ public class DataHandler extends BroadcastReceiver
         context.onFavoriteChange();
     }
 
-    /**
-     * Helper function to get the position of a favorite. Used mainly by the drag and drop system to know where to place the dropped app.
-     *
-     * @param context mainActivity context
-     * @param id      the app you want to get the position of.
-     * @return favorite position
-     */
-    public int getFavoritePosition(MainActivity context, String id) {
-        String favApps = PreferenceManager.getDefaultSharedPreferences(this.context).
-                getString("favorite-apps-list", "");
-        List<String> favAppsList = new ArrayList<>(Arrays.asList(favApps.split(";")));
-
-        return favAppsList.indexOf(id);
-    }
-
-    public void addToFavorites(MainActivity context, String id) {
-
+    public void addToFavorites(String id) {
         String favApps = PreferenceManager.getDefaultSharedPreferences(context).
                 getString("favorite-apps-list", "");
 
         // Check if we are already a fav icon
+        assert favApps != null;
         if (favApps.contains(id + ";")) {
             //shouldn't happen
             return;
@@ -644,16 +727,14 @@ public class DataHandler extends BroadcastReceiver
 
         PreferenceManager.getDefaultSharedPreferences(context).edit()
                 .putString("favorite-apps-list", favApps + id + ";").apply();
-
-        context.onFavoriteChange();
     }
 
-    public void removeFromFavorites(MainActivity context, String id) {
-
+    public void removeFromFavorites(String id) {
         String favApps = PreferenceManager.getDefaultSharedPreferences(context).
                 getString("favorite-apps-list", "");
 
         // Check if we are not already a fav icon
+        assert favApps != null;
         if (!favApps.contains(id + ";")) {
             //shouldn't happen
             return;
@@ -661,8 +742,6 @@ public class DataHandler extends BroadcastReceiver
 
         PreferenceManager.getDefaultSharedPreferences(context).edit()
                 .putString("favorite-apps-list", favApps.replace(id + ";", "")).apply();
-
-        context.onFavoriteChange();
     }
 
     @SuppressWarnings("StringSplitter")
@@ -693,6 +772,10 @@ public class DataHandler extends BroadcastReceiver
      * @param id pojo.id of item to record
      */
     public void addToHistory(String id) {
+        if(id.isEmpty()) {
+            return;
+        }
+
         boolean frozen = PreferenceManager.getDefaultSharedPreferences(context).
                 getBoolean("freeze-history", false);
 
@@ -727,6 +810,6 @@ public class DataHandler extends BroadcastReceiver
 
     static final class ProviderEntry {
         public IProvider provider = null;
-        public ServiceConnection connection = null;
+        ServiceConnection connection = null;
     }
 }

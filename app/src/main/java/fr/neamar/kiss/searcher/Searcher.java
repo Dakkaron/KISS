@@ -5,6 +5,8 @@ import android.content.Context;
 import android.os.AsyncTask;
 import android.util.Log;
 
+import androidx.annotation.CallSuper;
+
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,7 +14,6 @@ import java.util.PriorityQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import androidx.annotation.CallSuper;
 import fr.neamar.kiss.KissApplication;
 import fr.neamar.kiss.MainActivity;
 import fr.neamar.kiss.pojo.Pojo;
@@ -26,6 +27,11 @@ public abstract class Searcher extends AsyncTask<Void, Result, Void> {
     final WeakReference<MainActivity> activityWeakReference;
     private final PriorityQueue<Pojo> processedPojos;
     private long start;
+    /**
+     * Set to true when we are simply refreshing current results (scroll will not be reset)
+     * When false, we reset the scroll back to the last item in the list
+     */
+    private boolean isRefresh = false;
     protected final String query;
 
     Searcher(MainActivity activity, String query) {
@@ -96,9 +102,10 @@ public abstract class Searcher extends AsyncTask<Void, Result, Void> {
             while (queue.peek() != null) {
                 results.add(Result.fromPojo(activity, queue.poll()));
             }
+
             activity.beforeListChange();
 
-            activity.adapter.updateResults(results, query);
+            activity.adapter.updateResults(results, isRefresh, query);
 
             activity.afterListChange();
         }
@@ -109,9 +116,7 @@ public abstract class Searcher extends AsyncTask<Void, Result, Void> {
         Log.v("Timing", "Time to run query `" + query + "` on " + getClass().getSimpleName() + " to completion: " + time + "ms");
     }
 
-    public interface DataObserver {
-        void beforeListChange();
-
-        void afterListChange();
+    public void setRefresh(boolean refresh) {
+        isRefresh = refresh;
     }
 }

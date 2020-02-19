@@ -1,15 +1,16 @@
 package fr.neamar.kiss.preference;
 
 import android.content.Context;
-import android.graphics.Typeface;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.preference.DialogPreference;
-import androidx.annotation.ColorInt;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewTreeObserver.OnGlobalLayoutListener;
 import android.widget.Button;
+
+import androidx.annotation.ColorInt;
 
 import com.android.colorpicker.ColorPickerDialog;
 import com.android.colorpicker.ColorPickerPalette;
@@ -20,16 +21,12 @@ import fr.neamar.kiss.UIColors;
 
 
 public class ColorPreference extends DialogPreference implements OnColorSelectedListener {
-    public final int COLOR_TRANSPARENT = 0x00000000;
-    public final int COLOR_LIGHT_TRANSPARENT = 0xAAFFFFFF;
-    public final int COLOR_DARK_TRANSPARENT = 0xAA000000;
+    private final int COLOR_TRANSPARENT = 0x00000000;
+    private final int COLOR_LIGHT_TRANSPARENT = 0xAAFFFFFF;
+    private final int COLOR_DARK_TRANSPARENT = 0xAA000000;
     private ColorPickerPalette palette;
 
     private int selectedColor;
-
-    public ColorPreference(Context context) {
-        this(context, null);
-    }
 
     public ColorPreference(Context context, AttributeSet attrs) {
         super(context, attrs);

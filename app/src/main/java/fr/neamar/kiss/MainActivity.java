@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.database.DataSetObserver;
 import android.os.Build;
 import android.os.Bundle;
@@ -27,6 +29,7 @@ import android.view.View;
 import android.view.ViewAnimationUtils;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.PopupWindow;
 import android.widget.TextView;
@@ -40,7 +43,6 @@ import fr.neamar.kiss.adapter.RecordAdapter;
 import fr.neamar.kiss.broadcast.IncomingCallHandler;
 import fr.neamar.kiss.forwarder.ForwarderManager;
 import fr.neamar.kiss.forwarder.Widget;
-import fr.neamar.kiss.result.Result;
 import fr.neamar.kiss.searcher.ApplicationsSearcher;
 import fr.neamar.kiss.searcher.HistorySearcher;
 import fr.neamar.kiss.searcher.QueryInterface;
@@ -58,7 +60,7 @@ import fr.neamar.kiss.utils.SystemUiVisibilityHelper;
 
 import static android.view.HapticFeedbackConstants.LONG_PRESS;
 
-public class MainActivity extends Activity implements QueryInterface, KeyboardScrollHider.KeyboardHandler, View.OnTouchListener, Searcher.DataObserver {
+public class MainActivity extends Activity implements QueryInterface, KeyboardScrollHider.KeyboardHandler, View.OnTouchListener {
 
     public static final String START_LOAD = "fr.neamar.summon.START_LOAD";
     public static final String LOAD_OVER = "fr.neamar.summon.LOAD_OVER";
@@ -192,7 +194,7 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
             public void onReceive(Context context, Intent intent) {
                 //noinspection ConstantConditions
                 if (intent.getAction().equalsIgnoreCase(LOAD_OVER)) {
-                    updateSearchRecords();
+                    updateSearchRecords(true);
                 } else if (intent.getAction().equalsIgnoreCase(FULL_LOAD_OVER)) {
                     Log.v(TAG, "All providers are done loading.");
 
@@ -241,14 +243,10 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
         this.emptyListView.setOnTouchListener(this);
 
         // Create adapter for records
-        this.adapter = new RecordAdapter(this, this, new ArrayList<Result>());
+        this.adapter = new RecordAdapter(this, new ArrayList<>());
         this.list.setAdapter(this.adapter);
 
-        this.list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> parent, View v, int position, long id) {
-                adapter.onClick(position, v);
-            }
-        });
+        this.list.setOnItemClickListener((parent, v, position, id) -> adapter.onClick(position, v));
 
         this.list.setLongClickable(true);
         this.list.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
@@ -295,7 +293,7 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
                     displayKissBar(false, false);
                 }
                 String text = s.toString();
-                updateSearchRecords(text);
+                updateSearchRecords(false, text);
                 displayClearOnInput();
             }
         });
@@ -404,7 +402,7 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
 
         // We need to update the history in case an external event created new items
         // (for instance, installed a new app, got a phone call or simply clicked on a favorite)
-        updateSearchRecords();
+        updateSearchRecords(true);
         displayClearOnInput();
 
         if (isViewingAllApps()) {
@@ -469,7 +467,11 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
             // will hide history again)
             searchEditText.setText("");
         }
-        // No call to super.onBackPressed(), since this would quit the launcher.
+
+        // Calling super.onBackPressed() will quit the launcher, only do this if KISS is not the user's default home.
+        if (!isKissDefaultLauncher()) {
+            super.onBackPressed();
+        }
     }
 
     @Override
@@ -539,7 +541,7 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String permissions[], @NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         forwarderManager.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
@@ -549,10 +551,8 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
             return true;
         }
 
-        if (view.getId() == searchEditText.getId()) {
-            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                searchEditText.performClick();
-            }
+        if (view.getId() == searchEditText.getId() && event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            searchEditText.performClick();
         }
         return true;
     }
@@ -705,8 +705,8 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
         forwarderManager.onDisplayKissBar(display);
     }
 
-    public void updateSearchRecords() {
-        updateSearchRecords(searchEditText.getText().toString());
+    public void updateSearchRecords(boolean isRefresh) {
+        updateSearchRecords(isRefresh, searchEditText.getText().toString());
     }
 
     /**
@@ -714,18 +714,21 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
      * It will ask all the providers for data
      * This function is not called for non search-related changes! Have a look at onDataSetChanged() if that's what you're looking for :)
      *
+     * @param isRefresh whether the query is refreshing the existing result, or is a completely new query
      * @param query the query on which to search
      */
-    private void updateSearchRecords(String query) {
+    private void updateSearchRecords(boolean isRefresh, String query) {
         resetTask();
         dismissPopup();
 
-        forwarderManager.updateSearchRecords(query);
+        forwarderManager.updateSearchRecords(isRefresh, query);
 
         if (query.isEmpty()) {
             systemUiVisibilityHelper.resetScroll();
         } else {
-            runTask(new QuerySearcher(this, query));
+            QuerySearcher querySearcher = new QuerySearcher(this, query);
+            querySearcher.setRefresh(isRefresh);
+            runTask(querySearcher);
         }
     }
 
@@ -740,6 +743,45 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
             searchTask.cancel(true);
             searchTask = null;
         }
+    }
+
+    /**
+     * transcriptMode on the listView decides when to scroll back to the first item.
+     * The value we have by default, TRANSCRIPT_MODE_ALWAYS_SCROLL, means that on every new search,
+     * (actually, on any change to the listview's adapter items)
+     * scroll is reset to the bottom, which makes sense as we want the most relevant search results
+     * to be visible first (searching for "ab" after "a" should reset the scroll).
+     * However, when updating an existing result set (for instance to remove a record, add a tag,
+     * etc.), we don't want the scroll to be reset. When this happens, we temporarily disable
+     * the scroll mode.
+     * However, we need to be careful here: the PullView system we use actually relies on
+     * TRANSCRIPT_MODE_ALWAYS_SCROLL being active. So we add a new message in the queue to change
+     * back the transcript mode once we've rendered the change.
+     * <p>
+     * (why is PullView dependent on this? When you show the keyboard, no event is being dispatched
+     * to our application, but if we don't reset the scroll when the keyboard appears then you
+     * could be looking at an element that isn't the latest one as you start scrolling down
+     * [which will hide the keyboard] and start a very ugly animation revealing items currently
+     * hidden. Fairly easy to test, remove the transcript mode from the XML and the .post() here,
+     * then scroll in your history, display the keyboard and scroll again on your history)
+     */
+    @Override
+    public void temporarilyDisableTranscriptMode() {
+        list.setTranscriptMode(AbsListView.TRANSCRIPT_MODE_DISABLED);
+        // Add a message to be processed after all current messages, to reset transcript mode to default
+        list.post(() -> list.setTranscriptMode(AbsListView.TRANSCRIPT_MODE_ALWAYS_SCROLL));
+    }
+
+    /**
+     * Force  set transcript mode.
+     * Be careful when using this, it's almost always better to use temporarilyDisableTranscriptMode()
+     * unless you need to deal with the keyboard appearing for something else than a search.
+     * Always make sure you call this function twice, once to disable, and once to re-enable
+     * @param transcriptMode new transcript mode to set on the list
+     */
+    @Override
+    public void updateTranscriptMode(int transcriptMode) {
+        list.setTranscriptMode(transcriptMode);
     }
 
     /**
@@ -801,7 +843,6 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
 
     @Override
     public void hideKeyboard() {
-
         // Check if no view has focus:
         View view = this.getCurrentFocus();
         if (view != null) {
@@ -812,6 +853,8 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
 
         systemUiVisibilityHelper.onKeyboardVisibilityChanged(false);
         dismissPopup();
+
+        searchEditText.clearFocus();
     }
 
     @Override
@@ -832,12 +875,10 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
         return isDisplayingKissBar;
     }
 
-    @Override
     public void beforeListChange() {
         list.prepareChangeAnim();
     }
 
-    @Override
     public void afterListChange() {
         list.animateChange();
     }
@@ -870,5 +911,20 @@ public class MainActivity extends Activity implements QueryInterface, KeyboardSc
 
     public void onWallpaperScroll(float fCurrent) {
         forwarderManager.onWallpaperScroll(fCurrent);
+    }
+    
+    public boolean isKissDefaultLauncher() {
+        String homePackage;
+        try {
+            Intent i = new Intent(Intent.ACTION_MAIN);
+            i.addCategory(Intent.CATEGORY_HOME);
+            PackageManager pm = getPackageManager();
+            final ResolveInfo mInfo = pm.resolveActivity(i, PackageManager.MATCH_DEFAULT_ONLY);
+            homePackage = mInfo.activityInfo.packageName;
+        } catch (Exception e) {
+            homePackage = "unknown";
+        }
+
+        return homePackage.equals(this.getPackageName());
     }
 }

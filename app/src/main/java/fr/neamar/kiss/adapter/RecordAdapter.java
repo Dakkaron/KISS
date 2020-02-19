@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 import fr.neamar.kiss.KissApplication;
 import fr.neamar.kiss.normalizer.StringNormalizer;
@@ -29,7 +29,6 @@ import fr.neamar.kiss.ui.ListPopup;
 import fr.neamar.kiss.utils.FuzzyScore;
 
 public class RecordAdapter extends BaseAdapter implements SectionIndexer {
-    private final Context context;
     private final QueryInterface parent;
     private FuzzyScore fuzzyScore;
 
@@ -43,8 +42,7 @@ public class RecordAdapter extends BaseAdapter implements SectionIndexer {
     // List of available sections (only used for fast scroll)
     private String[] sections = new String[0];
 
-    public RecordAdapter(Context context, QueryInterface parent, ArrayList<Result> results) {
-        this.context = context;
+    public RecordAdapter(QueryInterface parent, ArrayList<Result> results) {
         this.parent = parent;
         this.results = results;
         this.fuzzyScore = null;
@@ -98,25 +96,13 @@ public class RecordAdapter extends BaseAdapter implements SectionIndexer {
     @Override
     public @NonNull
     View getView(int position, View convertView, @NonNull ViewGroup parent) {
-        if (convertView != null) {
-            if (!(convertView.getTag() instanceof Integer))
-                convertView = null;
-            else if ((Integer) convertView.getTag() != getItemViewType(position)) {
-                // This is happening on HTC Desire X (Android 4.1.1, API 16)
-                //throw new IllegalStateException( "can't convert view from different type" );
-                convertView = null;
-            }
-        }
-        View view = results.get(position).display(context, results.size() - position, convertView, fuzzyScore);
-        //Log.d( "TBog", "getView pos " + position + " convertView " + ((convertView == null) ? "null" : convertView.toString()) + " will return " + view.toString() );
-        view.setTag(getItemViewType(position));
-        return view;
+        return results.get(position).display(parent.getContext(), convertView, parent, fuzzyScore);
     }
 
     public void onLongClick(final int pos, View v) {
-        ListPopup menu = results.get(pos).getPopupMenu(context, this, v);
+        ListPopup menu = results.get(pos).getPopupMenu(v.getContext(), this, v);
 
-        //check if menu contains elements and if yes show it
+        // check if menu contains elements and if yes show it
         if (menu.getAdapter().getCount() > 0) {
             parent.registerPopup(menu);
             menu.show(v);
@@ -128,7 +114,7 @@ public class RecordAdapter extends BaseAdapter implements SectionIndexer {
 
         try {
             result = results.get(position);
-            result.launch(context, v);
+            result.launch(v.getContext(), v);
         } catch (ArrayIndexOutOfBoundsException ignored) {
             return;
         }
@@ -138,28 +124,39 @@ public class RecordAdapter extends BaseAdapter implements SectionIndexer {
         // * to avoid a flickering -- launchOccurred will refresh the list
         // Thus TOUCH_DELAY * 3
         Handler handler = new Handler();
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                parent.launchOccurred();
-            }
-        }, KissApplication.TOUCH_DELAY * 3);
+        handler.postDelayed(parent::launchOccurred, KissApplication.TOUCH_DELAY * 3);
 
     }
 
-    public void removeResult(Result result) {
+    public void removeResult(Context context, Result result) {
         results.remove(result);
-        result.deleteRecord(context);
         notifyDataSetChanged();
+        // Do not reset scroll, we want the remaining items to still be in view
+        parent.temporarilyDisableTranscriptMode();
     }
 
-    public void updateResults(List<Result> results, String query) {
-        this.results = results;
+    public void updateResults(List<Result> results, boolean isRefresh, String query) {
+        this.results.clear();
+        this.results.addAll(results);
         StringNormalizer.Result queryNormalized = StringNormalizer.normalizeWithResult(query, false);
 
         fuzzyScore = new FuzzyScore(queryNormalized.codePoints, true);
         notifyDataSetChanged();
+
+        if(isRefresh) {
+            // We're refreshing an existing dataset, do not reset scroll!
+            parent.temporarilyDisableTranscriptMode();
+        }
     }
+
+    /**
+     * Force set transcript mode on the list.
+     * Prefer to use `parent.temporarilyDisableTranscriptMode();`
+     */
+    public void updateTranscriptMode(int transcriptMode) {
+        parent.updateTranscriptMode(transcriptMode);
+    }
+
 
     public void clear() {
         this.results.clear();
@@ -185,13 +182,18 @@ public class RecordAdapter extends BaseAdapter implements SectionIndexer {
         }
 
         // Generate section list
-        Set<String> sectionLetters = alphaIndexer.keySet();
-        ArrayList<String> sectionList = new ArrayList<>(sectionLetters);
-        Collections.sort(sectionList);
-        // We're displaying from A to Z, everything needs to be reversed
-        Collections.reverse(sectionList);
-        sections = new String[sectionList.size()];
-        sectionList.toArray(sections);
+        List<Map.Entry<String, Integer>> entries = new ArrayList<>(alphaIndexer.entrySet());
+        Collections.sort(entries, (o1, o2) -> {
+            if (o2.getValue().equals(o1.getValue())) {
+                return 0;
+            }
+            // We're displaying from A to Z, everything needs to be reversed
+            return o2.getValue() > o1.getValue() ? -1 : 1;
+        });
+        sections = new String[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            sections[i] = entries.get(i).getKey();
+        }
     }
 
     @Override
@@ -201,7 +203,7 @@ public class RecordAdapter extends BaseAdapter implements SectionIndexer {
 
     @Override
     public int getPositionForSection(int sectionIndex) {
-        if(sections.length == 0) {
+        if (sections.length == 0) {
             return 0;
         }
 
@@ -209,7 +211,7 @@ public class RecordAdapter extends BaseAdapter implements SectionIndexer {
         // that does not exist anymore.
         // It's likely there is a threading issue in our code somewhere,
         // But I was unable to find where, so the following line is a quick and dirty fix.
-        sectionIndex = Math.min(sections.length - 1, sectionIndex);
+        sectionIndex = Math.max(0, Math.min(sections.length - 1, sectionIndex));
         return alphaIndexer.get(sections[sectionIndex]);
     }
 

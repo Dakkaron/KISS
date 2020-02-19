@@ -86,7 +86,7 @@ public class IconsHandler {
      *
      * @param packageName Android package ID of the package to parse
      */
-    public void loadIconsPack(String packageName) {
+    void loadIconsPack(String packageName) {
 
         //clear icons pack
         iconsPackPackageName = packageName;
@@ -140,10 +140,8 @@ public class IconsHandler {
                             }
                         }
                         //parse <scale> xml tags used as scale factor of original bitmap icon
-                        else if (xpp.getName().equals("scale")) {
-                            if (xpp.getAttributeCount() > 0 && xpp.getAttributeName(0).equals("factor")) {
-                                factor = Float.valueOf(xpp.getAttributeValue(0));
-                            }
+                        else if (xpp.getName().equals("scale") && xpp.getAttributeCount() > 0 && xpp.getAttributeName(0).equals("factor")) {
+                            factor = Float.valueOf(xpp.getAttributeValue(0));
                         }
                         //parse <item> xml tags for custom icons
                         if (xpp.getName().equals("item")) {
@@ -174,7 +172,6 @@ public class IconsHandler {
     private Bitmap loadBitmap(String drawableName) {
         int id = iconPackres.getIdentifier(drawableName, "drawable", iconsPackPackageName);
         if (id > 0) {
-            //noinspection deprecation: Resources.getDrawable(int, Theme) requires SDK 21+
             Drawable bitmap = iconPackres.getDrawable(id);
             if (bitmap instanceof BitmapDrawable) {
                 return ((BitmapDrawable) bitmap).getBitmap();
@@ -188,8 +185,15 @@ public class IconsHandler {
         try {
             if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 LauncherApps launcher = (LauncherApps) ctx.getSystemService(Context.LAUNCHER_APPS_SERVICE);
-                LauncherActivityInfo info = launcher.getActivityList(componentName.getPackageName(), userHandle.getRealHandle()).get(0);
-                return info.getBadgedIcon(0);
+                List<LauncherActivityInfo> icons = launcher.getActivityList(componentName.getPackageName(), userHandle.getRealHandle());
+                for (LauncherActivityInfo info : icons) {
+                    if (info.getComponentName().equals(componentName)) {
+                        return info.getBadgedIcon(0);
+                    }
+                }
+
+                // This should never happen, let's jsut return the first icon
+                return icons.get(0).getBadgedIcon(0);
             } else {
                 return pm.getActivityIcon(componentName);
             }
@@ -214,10 +218,9 @@ public class IconsHandler {
         if (drawable != null) { //there is a custom icon
             int id = iconPackres.getIdentifier(drawable, "drawable", iconsPackPackageName);
             if (id > 0) {
-                //noinspection deprecation: Resources.getDrawable(int, Theme) requires SDK 21+
                 try {
                     return iconPackres.getDrawable(id);
-                } catch(Resources.NotFoundException e) {
+                } catch (Resources.NotFoundException e) {
                     // Unable to load icon, keep going.
                     e.printStackTrace();
                 }
@@ -309,7 +312,7 @@ public class IconsHandler {
         }
     }
 
-    public HashMap<String, String> getIconsPacks() {
+    HashMap<String, String> getIconsPacks() {
         return iconsPacks;
     }
 

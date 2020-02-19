@@ -6,12 +6,10 @@ import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.os.Build;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import fr.neamar.kiss.MainActivity;
@@ -46,6 +44,8 @@ class InterfaceTweaks extends Forwarder {
                 mainActivity.setTheme(R.style.AppThemeAmoledDark);
                 break;
         }
+
+        UIColors.applyOverlay(mainActivity);
     }
 
     void onCreate() {
@@ -176,8 +176,11 @@ class InterfaceTweaks extends Forwarder {
         // Launcher button should have the main color
         ImageView launcherButton = mainActivity.findViewById(R.id.launcherButton);
         launcherButton.setColorFilter(primaryColorOverride);
-        ProgressBar loaderBar = mainActivity.findViewById(R.id.loaderBar);
-        loaderBar.getIndeterminateDrawable().setColorFilter(primaryColorOverride, PorterDuff.Mode.SRC_IN);
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            ProgressBar loaderBar = mainActivity.findViewById(R.id.loaderBar);
+            loaderBar.getIndeterminateDrawable().setColorFilter(primaryColorOverride, PorterDuff.Mode.SRC_IN);
+        }
 
         // Kissbar background
         mainActivity.kissBar.getBackground().mutate().setColorFilter(primaryColorOverride, PorterDuff.Mode.SRC_IN);

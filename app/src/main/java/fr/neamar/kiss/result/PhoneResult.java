@@ -10,9 +10,12 @@ import android.os.Build;
 import android.provider.ContactsContract;
 import android.util.Pair;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.ImageView;
 import android.widget.TextView;
+
+import androidx.annotation.NonNull;
 
 import java.util.Collections;
 
@@ -31,20 +34,21 @@ public class PhoneResult extends Result {
         this.phonePojo = phonePojo;
     }
 
+    @NonNull
     @Override
-    public View display(Context context, int position, View v, FuzzyScore fuzzyScore) {
-        if (v == null)
-            v = inflateFromId(context, R.layout.item_phone);
+    public View display(Context context, View view, @NonNull ViewGroup parent, FuzzyScore fuzzyScore) {
+        if (view == null)
+            view = inflateFromId(context, R.layout.item_phone, parent);
 
-        TextView phoneText = v.findViewById(R.id.item_phone_text);
+        TextView phoneText = view.findViewById(R.id.item_phone_text);
         String text = String.format(context.getString(R.string.ui_item_phone), phonePojo.phone);
         int pos = text.indexOf(phonePojo.phone);
         int len = phonePojo.phone.length();
         displayHighlighted(text, Collections.singletonList(new Pair<Integer, Integer>(pos, pos + len)), phoneText, context);
 
-        ((ImageView) v.findViewById(R.id.item_phone_icon)).setColorFilter(getThemeFillColor(context), PorterDuff.Mode.SRC_IN);
+        ((ImageView) view.findViewById(R.id.item_phone_icon)).setColorFilter(getThemeFillColor(context), PorterDuff.Mode.SRC_IN);
 
-        return v;
+        return view;
     }
 
     @Override
@@ -99,7 +103,9 @@ public class PhoneResult extends Result {
 
     @Override
     public Drawable getDrawable(Context context) {
-        //noinspection deprecation: getDrawable(int, Theme) requires SDK 21+
+        //noinspection: getDrawable(int, Theme) requires SDK 21+
         return context.getResources().getDrawable(android.R.drawable.ic_menu_call);
     }
+
+
 }

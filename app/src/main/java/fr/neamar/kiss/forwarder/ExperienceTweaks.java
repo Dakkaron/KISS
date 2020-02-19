@@ -18,6 +18,7 @@ import fr.neamar.kiss.MainActivity;
 import fr.neamar.kiss.R;
 import fr.neamar.kiss.searcher.HistorySearcher;
 import fr.neamar.kiss.searcher.NullSearcher;
+import fr.neamar.kiss.searcher.Searcher;
 
 // Deals with any settings in the "User Experience" setting sub-screen
 class ExperienceTweaks extends Forwarder {
@@ -40,12 +41,7 @@ class ExperienceTweaks extends Forwarder {
     private final static int INPUT_TYPE_WORKAROUND = InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT;
 
-    private final Runnable displayKeyboardRunnable = new Runnable() {
-        @Override
-        public void run() {
-            mainActivity.showKeyboard();
-        }
-    };
+    private final Runnable displayKeyboardRunnable = mainActivity::showKeyboard;
 
     private View mainEmptyView;
     private final GestureDetector gd;
@@ -173,7 +169,7 @@ class ExperienceTweaks extends Forwarder {
         }
     }
 
-    void updateSearchRecords(String query) {
+    void updateSearchRecords(boolean isRefresh, String query) {
         if (query.isEmpty()) {
             if (isMinimalisticModeEnabled()) {
                 mainActivity.runTask(new NullSearcher(mainActivity));
@@ -184,7 +180,9 @@ class ExperienceTweaks extends Forwarder {
                     mainActivity.favoritesBar.setVisibility(View.GONE);
                 }
             } else {
-                mainActivity.runTask(new HistorySearcher(mainActivity));
+                Searcher searcher = new HistorySearcher(mainActivity);
+                searcher.setRefresh(isRefresh);
+                mainActivity.runTask(searcher);
             }
         }
     }
@@ -246,10 +244,11 @@ class ExperienceTweaks extends Forwarder {
     /**
      * Should we force the keyboard not to display suggestions?
      * (swiftkey is broken, see https://github.com/Neamar/KISS/issues/44)
+     * (same for flesky: https://github.com/Neamar/KISS/issues/1263)
      */
     private boolean isNonCompliantKeyboard() {
-        String currentKeyboard = Settings.Secure.getString(mainActivity.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
-        return currentKeyboard.contains("swiftkey");
+        String currentKeyboard = Settings.Secure.getString(mainActivity.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD).toLowerCase();
+        return currentKeyboard.contains("swiftkey") || currentKeyboard.contains("flesky");
     }
 
     /**

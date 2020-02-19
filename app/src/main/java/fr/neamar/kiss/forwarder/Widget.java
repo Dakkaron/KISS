@@ -5,9 +5,7 @@ import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
-import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.graphics.Point;
 import android.os.Build;
 import android.view.*;
@@ -25,10 +23,8 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
     private static final int REQUEST_CREATE_APPWIDGET = 5;
 
     private static final int APPWIDGET_HOST_ID = 442;
-    private static final String WIDGET_PREFERENCE_ID = "fr.neamar.kiss.widgetprefs";
 
-    private SharedPreferences widgetPrefs;
-
+    private static final String WIDGET_PREF_KEY = "widget-id";
     /**
      * Widget fields
      */
@@ -46,8 +42,6 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
 
     void onCreate() {
         // Initialize widget manager and host, restore widgets
-        widgetPrefs = mainActivity.getSharedPreferences(WIDGET_PREFERENCE_ID, Context.MODE_PRIVATE);
-
         mAppWidgetManager = AppWidgetManager.getInstance(mainActivity);
         mAppWidgetHost = new AppWidgetHost(mainActivity, APPWIDGET_HOST_ID);
         widgetArea = mainActivity.findViewById(R.id.widgetLayout);
@@ -170,11 +164,11 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
      * @param appWidgetId id of widget to add
      */
     private WidgetPreferences addWidgetToLauncher(int appWidgetId) {
-        // only add widgets if in minimal mode (may need launcher restart when turned on)
+        // only add widgets if in minimal mode
         if (prefs.getBoolean("history-hide", true)) {
             // remove empty list view when using widgets, this would block touches on the widget
             mainActivity.emptyListView.setVisibility(View.GONE);
-            //add widget to view
+            // add widget to view
             AppWidgetProviderInfo appWidgetInfo = mAppWidgetManager.getAppWidgetInfo(appWidgetId);
             if (appWidgetInfo == null) {
                 //removeAllWidgets();
@@ -184,7 +178,7 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
             AppWidgetHostView hostView = mAppWidgetHost.createView(mainActivity, appWidgetId, appWidgetInfo);
             hostView.setMinimumHeight(appWidgetInfo.minHeight);
             hostView.setAppWidget(appWidgetId, appWidgetInfo);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
                 hostView.updateAppWidgetSize(null, appWidgetInfo.minWidth, appWidgetInfo.minHeight, appWidgetInfo.minWidth, appWidgetInfo.minHeight);
             }
             addWidgetHostView(hostView);
@@ -276,9 +270,7 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
         // remove widget from view
         mAppWidgetHost.deleteAppWidgetId(appWidgetId);
         // remove widget id from persistent prefs
-        SharedPreferences.Editor widgetPrefsEditor = widgetPrefs.edit();
-        widgetPrefsEditor.remove(String.valueOf(appWidgetId));
-        widgetPrefsEditor.apply();
+        prefs.edit().remove(WIDGET_PREF_KEY).apply();
     }
 
     private boolean canAddWidget() {
@@ -292,7 +284,7 @@ public class Widget extends Forwarder implements WidgetMenu.OnClickListener {
      */
     private void addAppWidget(Intent data) {
         int appWidgetId = data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
-        //add widget
+        // add widget
         WidgetPreferences wp = addWidgetToLauncher(appWidgetId);
 
         // Save widget in preferences

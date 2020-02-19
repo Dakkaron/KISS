@@ -9,7 +9,7 @@ buildscript {
 
 plugins {
     id 'com.android.application'
-    id 'net.ltgt.errorprone' version '0.7.1'
+    id 'net.ltgt.errorprone' version '1.1.1'
 }
 
 android {
@@ -19,8 +19,8 @@ android {
         applicationId 'fr.neamar.kiss'
         minSdkVersion 15
         targetSdkVersion 28
-        versionCode 152
-        versionName "3.8.0"
+        versionCode 169
+        versionName "3.11.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -29,20 +29,33 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+        debug {
+            applicationIdSuffix ".debug"
+        }
+    }
+    compileOptions {
+        sourceCompatibility = '1.8'
+        targetCompatibility = '1.8'
     }
 }
 
 dependencies {
-    androidTestImplementation 'androidx.test:runner:1.1.1'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.1.1'
-    androidTestImplementation 'androidx.test:rules:1.1.1'
+    androidTestImplementation 'androidx.test:runner:1.2.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.2.0'
+    androidTestImplementation 'androidx.test:rules:1.2.0'
 
-    implementation 'androidx.annotation:annotation:1.0.2'
+    implementation 'androidx.annotation:annotation:1.1.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.4.2'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.4.2'
+    testImplementation 'org.hamcrest:hamcrest-library:2.1'
 
     errorproneJavac("com.google.errorprone:javac:9+181-r4173-1")
-    errorprone ("com.google.errorprone:error_prone_core:2.3.3")
+    errorprone ("com.google.errorprone:error_prone_core:2.3.4")
 }
 
-tasks.withType(JavaCompile) {
-    options.errorprone.errorproneArgs << '-Xep:MissingOverride:OFF'
+tasks.withType(JavaCompile).configureEach {
+    options.errorprone {
+        disable('MissingOverride')
+    }
 }
